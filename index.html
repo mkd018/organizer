@@ -1,0 +1,169 @@
+import React, { useState, useMemo, useRef } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, Grid, Environment } from '@react-three/drei';
+import * as THREE from 'three';
+import { STLExporter } from 'three-stdlib';
+
+export default function App() {
+  const [width, setWidth] = useState(200);
+  const [depth, setDepth] = useState(150);
+  const [height, setHeight] = useState(50);
+  const [wall, setWall] = useState(1.2);
+  const [cols, setCols] = useState(3);
+  const [rows, setRows] = useState(3);
+  
+  const [options, setOptions] = useState({
+    bottomless: false,
+    stackable: false,
+    labelSlots: false
+  });
+
+  const groupRef = useRef();
+  const toggleOption = (key) => setOptions(p => ({ ...p, [key]: !p[key] }));
+
+  const exportSTL = () => {
+    if (!groupRef.current) return;
+    const exporter = new STLExporter();
+    const stlString = exporter.parse(groupRef.current);
+    const blob = new Blob([stlString], { type: 'text/plain' });
+    const link = document.createElement('a');
+    link.style.display = 'none';
+    link.href = URL.createObjectURL(blob);
+    link.download = `organizer_${width}x${depth}x${height}.stl`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const boxes = useMemo(() => {
+    const parts = [];
+    const baseThickness = options.bottomless ? 0 : wall;
+    const innerH = height - baseThickness;
+    const yCenter = baseThickness + innerH / 2;
+
+    if (!options.bottomless) {
+      parts.push({ pos: [0, baseThickness/2, 0], size: [width, baseThickness, depth] });
+    }
+
+    parts.push({ pos: [-(width/2 - wall/2), yCenter, 0], size: [wall, innerH, depth] }); 
+    parts.push({ pos: [(width/2 - wall/2), yCenter, 0], size: [wall, innerH, depth] });  
+    parts.push({ pos: [0, yCenter, -(depth/2 - wall/2)], size: [width - wall*2, innerH, wall] }); 
+    parts.push({ pos: [0, yCenter, (depth/2 - wall/2)], size: [width - wall*2, innerH, wall] });  
+
+    const stepX = (width - wall * 2) / cols;
+    const stepZ = (depth - wall * 2) / rows;
+
+    for (let i = 1; i < cols; i++) {
+      const posX = -(width/2 - wall) + (i * stepX);
+      parts.push({ pos: [posX, yCenter, 0], size: [wall, innerH, depth - wall*2] });
+    }
+
+    for (let i = 1; i < rows; i++) {
+      const posZ = -(depth/2 - wall) + (i * stepZ);
+      parts.push({ pos: [0, yCenter, posZ], size: [width - wall*2, innerH, wall] });
+    }
+
+    if (options.stackable) {
+      const lipH = 3;
+      const lipW = wall / 2;
+      const lipY = height + lipH/2;
+      parts.push({ pos: [-(width/2 - lipW/2), lipY, 0], size: [lipW, lipH, depth] });
+      parts.push({ pos: [(width/2 - lipW/2), lipY, 0], size: [lipW, lipH, depth] });
+      parts.push({ pos: [0, lipY, -(depth/2 - lipW/2)], size: [width - wall, lipH, lipW] });
+      parts.push({ pos: [0, lipY, (depth/2 - lipW/2)], size: [width - wall, lipH, lipW] });
+    }
+
+    if (options.labelSlots) {
+      const labelW = Math.min(40, stepX * 0.6);
+      const labelH = 15;
+      const labelThick = 1;
+      for (let c = 0; c < cols; c++) {
+        const posX = -(width/2 - wall) + (c * stepX) + (stepX/2);
+        const posZ = (depth/2 - wall) - 2; 
+        const posY = height - labelH/2 - 2;
+        parts.push({ pos: [posX, posY, posZ], size: [labelW, labelH, labelThick], rot: [-Math.PI/6, 0, 0] });
+      }
+    }
+
+    return parts;
+  }, [width, depth, height, wall, cols, rows, options]);
+
+  return (
+    <div className="flex h-screen bg-gray-900 text-white font-sans overflow-hidden">
+      <div className="w-80 p-6 bg-gray-800 overflow-y-auto border-r border-gray-700 flex flex-col gap-6 z-10">
+        <h1 className="text-xl font-bold text-blue-400">Parametrik Organizer</h1>
+        
+        <div className="space-y-4">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Boyutlar (mm)</h2>
+          {[
+            { label: 'Genişlik', val: width, set: setWidth },
+            { label: 'Derinlik', val: depth, set: setDepth },
+            { label: 'Yükseklik', val: height, set: setHeight },
+            { label: 'Duvar Kalınlığı', val: wall, set: setWall }
+          ].map((dim, idx) => (
+            <div key={idx} className="flex flex-col">
+              <label className="text-sm mb-1">{dim.label}</label>
+              <input 
+                type="number" 
+                value={dim.val} 
+                onChange={(e) => dim.set(Number(e.target.value))}
+                className="bg-gray-700 rounded p-2 text-white outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-4">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Bölmeler</h2>
+          <div className="flex gap-4">
+            <div className="flex flex-col w-1/2">
+              <label className="text-sm mb-1">Sütun (X)</label>
+              <input type="number" value={cols} onChange={(e) => setCols(Math.max(1, Number(e.target.value)))} className="bg-gray-700 rounded p-2 text-white outline-none" />
+            </div>
+            <div className="flex flex-col w-1/2">
+              <label className="text-sm mb-1">Satır (Y)</label>
+              <input type="number" value={rows} onChange={(e) => setRows(Math.max(1, Number(e.target.value)))} className="bg-gray-700 rounded p-2 text-white outline-none" />
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Özellikler</h2>
+          {Object.keys(options).map((key) => (
+            <label key={key} className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm capitalize">{key === 'bottomless' ? 'Tabansız Izgara' : key === 'stackable' ? 'İstiflenebilir Dudak' : 'Etiket Yuvaları'}</span>
+              <div className={`w-10 h-6 rounded-full transition-colors relative ${options[key] ? 'bg-blue-500' : 'bg-gray-600'}`}>
+                <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${options[key] ? 'translate-x-4' : 'translate-x-0'}`} />
+              </div>
+              <input type="checkbox" className="hidden" checked={options[key]} onChange={() => toggleOption(key)} />
+            </label>
+          ))}
+        </div>
+
+        <button onClick={exportSTL} className="mt-auto py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold transition-colors">
+          STL İndir
+        </button>
+      </div>
+
+      <div className="flex-1 relative">
+        <Canvas camera={{ position: [width, height + 100, depth], fov: 45 }}>
+          <color attach="background" args={['#1a1a2e']} />
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[100, 200, 100]} intensity={1.5} castShadow />
+          <OrbitControls makeDefault />
+          <Grid args={[500, 500]} position={[0, -0.1, 0]} cellColor="#444" sectionColor="#666" />
+          <Environment preset="city" />
+          
+          <group ref={groupRef}>
+            {boxes.map((box, i) => (
+              <mesh key={i} position={box.pos} rotation={box.rot || [0,0,0]}>
+                <boxGeometry args={box.size} />
+                <meshStandardMaterial color="#3b82f6" roughness={0.4} metalness={0.1} />
+              </mesh>
+            ))}
+          </group>
+        </Canvas>
+      </div>
+    </div>
+  );
+}
